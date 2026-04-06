@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
 Name=Touch Scale App
-Exec=/home/pi/scale_project/env/bin/python /home/pi/scale_project/scale_app.py
-Path=/home/pi/scale_project
+Exec=/home/rporkert/scale_project/env/bin/python /home/rporkert/scale_project/scale_app.py
+Path=/home/rporkert/scale_project
 StartupNotify=false
