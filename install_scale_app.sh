@@ -8,14 +8,16 @@ echo "Installing system packages..."
 sudo apt install -y python3-venv python3-tk python3-rpi-lgpio
 
 echo "Creating project folder..."
-mkdir -p /home/pi/scale_project
+mkdir -p "$HOME/scale_project"
+mkdir -p "$HOME/.config/autostart"
 
 echo "Copying files..."
-cp scale_app.py /home/pi/scale_project/scale_app.py
-cp scale-app.desktop /home/pi/.config/autostart/scale-app.desktop
+cp scale_app.py "$HOME/scale_project/scale_app.py"
+cp calibrate_raw.py "$HOME/scale_project/calibrate_raw.py"
+cp scale-app.desktop "$HOME/.config/autostart/scale-app.desktop"
 
 echo "Creating virtual environment..."
-cd /home/pi/scale_project
+cd "$HOME/scale_project"
 python3 -m venv --system-site-packages env
 
 echo "Activating environment and installing HX711..."
@@ -23,9 +25,10 @@ source env/bin/activate
 pip install --upgrade pip
 pip install hx711
 
-echo "Making script executable..."
-chmod +x /home/pi/scale_project/scale_app.py
+echo "Making scripts executable..."
+chmod +x "$HOME/scale_project/scale_app.py"
+chmod +x "$HOME/scale_project/calibrate_raw.py"
 
 echo "Installation complete!"
-echo "Reboot the Pi to test:"
-echo "sudo reboot"
+echo "Run with:"
+echo "cd ~/scale_project && source env/bin/activate && python scale_app.py"
