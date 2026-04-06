@@ -32,24 +32,16 @@ class ScaleApp:
         self.hx = None
         self.busy = False
         self.measurements = []
-        self.hx_error = None
 
-        self.setup_hx711()
         self.build_ui()
+        self.show_startup_status()
 
-    def setup_hx711(self):
-        try:
-            self.hx = HX711(
-                dout_pin=DATA_PIN,
-                pd_sck_pin=CLOCK_PIN,
-                channel=HX711_CHANNEL,
-                gain=HX711_GAIN
-            )
-            self.hx.reset()
-            time.sleep(0.2)
-        except Exception as e:
-            self.hx = None
-            self.hx_error = str(e)
+    def show_startup_status(self):
+        self.value_label.config(text=f"--.- {DISPLAY_UNIT}", fg="lime")
+        self.status_label.config(text="App started")
+        self.instruction_label.config(
+            text="Tap CONNECT SENSOR after wiring the HX711, or test the screen now"
+        )
 
     def build_ui(self):
         self.main_frame = tk.Frame(self.root, bg="black")
@@ -66,7 +58,7 @@ class ScaleApp:
 
         self.instruction_label = tk.Label(
             self.main_frame,
-            text="Step on the scale, then tap START MEASUREMENT",
+            text="Loading...",
             font=("Arial", 20, "bold"),
             fg="cyan",
             bg="black",
@@ -107,6 +99,19 @@ class ScaleApp:
         button_frame = tk.Frame(self.main_frame, bg="black")
         button_frame.pack(pady=(10, 18))
 
+        self.connect_button = tk.Button(
+            button_frame,
+            text="CONNECT\nSENSOR",
+            font=("Arial", 22, "bold"),
+            width=10,
+            height=3,
+            command=self.connect_sensor,
+            bg="#6a1b9a",
+            fg="white",
+            bd=4
+        )
+        self.connect_button.grid(row=0, column=0, padx=12, pady=10)
+
         self.start_button = tk.Button(
             button_frame,
             text="START\nMEASUREMENT",
@@ -120,7 +125,7 @@ class ScaleApp:
             activeforeground="white",
             bd=4
         )
-        self.start_button.grid(row=0, column=0, padx=12, pady=10)
+        self.start_button.grid(row=0, column=1, padx=12, pady=10)
 
         self.zero_button = tk.Button(
             button_frame,
@@ -135,7 +140,7 @@ class ScaleApp:
             activeforeground="white",
             bd=4
         )
-        self.zero_button.grid(row=0, column=1, padx=12, pady=10)
+        self.zero_button.grid(row=0, column=2, padx=12, pady=10)
 
         self.remeasure_button = tk.Button(
             button_frame,
@@ -150,7 +155,7 @@ class ScaleApp:
             activeforeground="white",
             bd=4
         )
-        self.remeasure_button.grid(row=0, column=2, padx=12, pady=10)
+        self.remeasure_button.grid(row=0, column=3, padx=12, pady=10)
 
         self.quit_button = tk.Button(
             self.main_frame,
@@ -167,20 +172,52 @@ class ScaleApp:
         )
         self.quit_button.pack(pady=(5, 20))
 
-        if self.hx is None:
-            self.value_label.config(text="NO SENSOR")
-            self.status_label.config(text=f"HX711 startup error: {self.hx_error}")
-            self.instruction_label.config(text="Fix HX711 connection or software setup")
+    def connect_sensor(self):
+        if self.busy:
+            return
+
+        self.status_label.config(text="Connecting to HX711...")
+        self.progress_label.config(text="")
+        self.root.update()
+
+        try:
+            if self.hx is not None:
+                try:
+                    GPIO.cleanup()
+                except Exception:
+                    pass
+                self.hx = None
+
+            self.hx = HX711(
+                dout_pin=DATA_PIN,
+                pd_sck_pin=CLOCK_PIN,
+                channel=HX711_CHANNEL,
+                gain=HX711_GAIN
+            )
+            self.hx.reset()
+            time.sleep(0.2)
+
+            self.status_label.config(text="HX711 connected")
+            self.instruction_label.config(
+                text="Tap ZERO with nobody on the scale, then START MEASUREMENT"
+            )
+        except Exception as e:
+            self.hx = None
+            self.status_label.config(text=f"HX711 connection failed: {e}")
+            self.instruction_label.config(
+                text="If the HX711 is not wired yet, this is expected"
+            )
 
     def set_buttons_enabled(self, enabled):
         state = "normal" if enabled else "disabled"
+        self.connect_button.config(state=state)
         self.start_button.config(state=state)
         self.zero_button.config(state=state)
         self.remeasure_button.config(state=state)
 
     def read_raw_once(self):
         if self.hx is None:
-            raise RuntimeError("HX711 not initialized")
+            raise RuntimeError("HX711 not connected. Tap CONNECT SENSOR first.")
 
         values = self.hx.get_raw_data(num_measures=3)
         if not values:
@@ -194,6 +231,8 @@ class ScaleApp:
 
     def zero_scale(self):
         if self.hx is None or self.busy:
+            if self.hx is None:
+                self.status_label.config(text="Connect the sensor first")
             return
 
         self.busy = True
@@ -215,7 +254,7 @@ class ScaleApp:
             self.value_label.config(text=f"0.0 {DISPLAY_UNIT}")
             self.status_label.config(text=f"Current empty raw value: {zero_raw}")
             self.instruction_label.config(
-                text="Scale zeroed for testing. For permanent tare, copy this raw value into OFFSET."
+                text="For permanent tare, copy this raw value into OFFSET later"
             )
         except Exception as e:
             self.status_label.config(text=f"Zero failed: {e}")
@@ -231,10 +270,12 @@ class ScaleApp:
         self.value_label.config(text=f"--.- {DISPLAY_UNIT}", fg="lime")
         self.status_label.config(text="Ready")
         self.progress_label.config(text="")
-        self.instruction_label.config(text="Step on the scale, then tap START MEASUREMENT")
+        self.instruction_label.config(text="Tap CONNECT SENSOR, then measure")
 
     def start_measurement(self):
         if self.hx is None or self.busy:
+            if self.hx is None:
+                self.status_label.config(text="Connect the sensor first")
             return
 
         self.busy = True
@@ -284,9 +325,9 @@ class ScaleApp:
             self.status_label.config(text=f"Measurement failed: {e}")
             self.instruction_label.config(text="Check HX711 connection and calibration")
             self.progress_label.config(text="")
-
-        self.busy = False
-        self.set_buttons_enabled(True)
+        finally:
+            self.busy = False
+            self.set_buttons_enabled(True)
 
     def compute_stable_weight(self, readings):
         if not readings:
