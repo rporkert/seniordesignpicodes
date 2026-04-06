@@ -5,30 +5,20 @@ import tkinter as tk
 import RPi.GPIO as GPIO
 from hx711 import HX711
 
-# ============================================================
-# USER SETTINGS
-# ============================================================
-DATA_PIN = 17          # HX711 DT / DOUT
-CLOCK_PIN = 27         # HX711 SCK / CLK
+DATA_PIN = 17
+CLOCK_PIN = 27
 
-# Calibration values
-# Replace these later after calibration
 OFFSET = 0
-SCALE_FACTOR = 1000.0   # raw counts per displayed unit
+SCALE_FACTOR = 1000.0
+DISPLAY_UNIT = "lb"
 
-# Choose one:
-DISPLAY_UNIT = "lb"     # "lb", "kg", or "g"
-
-# Measurement behavior
 SETTLE_TIME_SECONDS = 1.5
 MEASUREMENT_TIME_SECONDS = 2.5
 SAMPLE_DELAY_SECONDS = 0.08
-MIN_VALID_WEIGHT = 20.0   # for pounds; lower this if using kg
+MIN_VALID_WEIGHT = 20.0
 
-# HX711 config
 HX711_CHANNEL = "A"
 HX711_GAIN = 128
-# ============================================================
 
 
 class ScaleApp:
@@ -189,10 +179,6 @@ class ScaleApp:
         self.remeasure_button.config(state=state)
 
     def read_raw_once(self):
-        """
-        Read one averaged raw sample from the HX711.
-        The package documents raw-reading methods, not direct weight conversion.
-        """
         if self.hx is None:
             raise RuntimeError("HX711 not initialized")
 
@@ -204,8 +190,7 @@ class ScaleApp:
         return statistics.median(int_values)
 
     def raw_to_display_units(self, raw_value):
-        value = (raw_value - OFFSET) / SCALE_FACTOR
-        return value
+        return (raw_value - OFFSET) / SCALE_FACTOR
 
     def zero_scale(self):
         if self.hx is None or self.busy:
@@ -308,8 +293,8 @@ class ScaleApp:
             return None
 
         median_value = statistics.median(readings)
-
         filtered = []
+
         for r in readings:
             if abs(r - median_value) <= max(2.0, abs(median_value) * 0.05):
                 filtered.append(r)
