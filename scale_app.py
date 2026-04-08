@@ -5,13 +5,30 @@ import tkinter as tk
 import RPi.GPIO as GPIO
 from hx711 import HX711
 
-DATA_PIN = 17
-CLOCK_PIN = 27
+# ------------------------------------------------
+# GPIO PINS
+# ------------------------------------------------
+DT1_PIN = 17
+SCK1_PIN = 27
 
-OFFSET = 0
-SCALE_FACTOR = 1000.0
+DT2_PIN = 22
+SCK2_PIN = 23
+
+# ------------------------------------------------
+# CALIBRATION VALUES
+# Replace these later with your real values
+# ------------------------------------------------
+OFFSET_1 = 0
+SCALE_FACTOR_1 = 1000.0
+
+OFFSET_2 = 0
+SCALE_FACTOR_2 = 1000.0
+
 DISPLAY_UNIT = "lb"
 
+# ------------------------------------------------
+# MEASUREMENT SETTINGS
+# ------------------------------------------------
 SETTLE_TIME_SECONDS = 1.5
 MEASUREMENT_TIME_SECONDS = 2.5
 SAMPLE_DELAY_SECONDS = 0.08
@@ -26,10 +43,12 @@ class ScaleApp:
         self.root = root
         self.root.title("Touch Scale")
         self.root.configure(bg="black")
-        self.root.attributes("-fullscreen", True)
+        self.root.after(100, lambda: self.root.attributes("-fullscreen", True))
+        self.root.attributes("-topmost", True)
         self.root.bind("<Escape>", self.quit_app)
 
-        self.hx = None
+        self.hx1 = None
+        self.hx2 = None
         self.busy = False
         self.measurements = []
 
@@ -40,7 +59,7 @@ class ScaleApp:
         self.value_label.config(text=f"--.- {DISPLAY_UNIT}", fg="lime")
         self.status_label.config(text="App started")
         self.instruction_label.config(
-            text="Tap CONNECT SENSOR after wiring the HX711, or test the screen now"
+            text="Tap CONNECT SENSORS after wiring both HX711 amplifiers"
         )
 
     def build_ui(self):
@@ -101,11 +120,11 @@ class ScaleApp:
 
         self.connect_button = tk.Button(
             button_frame,
-            text="CONNECT\nSENSOR",
+            text="CONNECT\nSENSORS",
             font=("Arial", 22, "bold"),
             width=10,
             height=3,
-            command=self.connect_sensor,
+            command=self.connect_sensors,
             bg="#6a1b9a",
             fg="white",
             bd=4
@@ -172,40 +191,47 @@ class ScaleApp:
         )
         self.quit_button.pack(pady=(5, 20))
 
-    def connect_sensor(self):
+    def connect_sensors(self):
         if self.busy:
             return
 
-        self.status_label.config(text="Connecting to HX711...")
+        self.status_label.config(text="Connecting to both HX711 amplifiers...")
         self.progress_label.config(text="")
         self.root.update()
 
         try:
-            if self.hx is not None:
-                try:
-                    GPIO.cleanup()
-                except Exception:
-                    pass
-                self.hx = None
+            GPIO.cleanup()
+            time.sleep(0.1)
 
-            self.hx = HX711(
-                dout_pin=DATA_PIN,
-                pd_sck_pin=CLOCK_PIN,
+            self.hx1 = HX711(
+                dout_pin=DT1_PIN,
+                pd_sck_pin=SCK1_PIN,
                 channel=HX711_CHANNEL,
                 gain=HX711_GAIN
             )
-            self.hx.reset()
+            self.hx1.reset()
             time.sleep(0.2)
 
-            self.status_label.config(text="HX711 connected")
+            self.hx2 = HX711(
+                dout_pin=DT2_PIN,
+                pd_sck_pin=SCK2_PIN,
+                channel=HX711_CHANNEL,
+                gain=HX711_GAIN
+            )
+            self.hx2.reset()
+            time.sleep(0.2)
+
+            self.status_label.config(text="Both HX711 amplifiers connected")
             self.instruction_label.config(
                 text="Tap ZERO with nobody on the scale, then START MEASUREMENT"
             )
+
         except Exception as e:
-            self.hx = None
-            self.status_label.config(text=f"HX711 connection failed: {e}")
+            self.hx1 = None
+            self.hx2 = None
+            self.status_label.config(text=f"Sensor connection failed: {e}")
             self.instruction_label.config(
-                text="If the HX711 is not wired yet, this is expected"
+                text="Check both HX711 wiring connections"
             )
 
     def set_buttons_enabled(self, enabled):
@@ -215,24 +241,29 @@ class ScaleApp:
         self.zero_button.config(state=state)
         self.remeasure_button.config(state=state)
 
-    def read_raw_once(self):
-        if self.hx is None:
-            raise RuntimeError("HX711 not connected. Tap CONNECT SENSOR first.")
+    def read_raw_once(self, hx, sensor_name):
+        if hx is None:
+            raise RuntimeError(f"{sensor_name} not connected")
 
-        values = self.hx.get_raw_data(num_measures=3)
+        values = hx.get_raw_data(num_measures=3)
         if not values:
-            raise RuntimeError("No HX711 data returned")
+            raise RuntimeError(f"No data returned from {sensor_name}")
 
         int_values = [int(v) for v in values]
         return statistics.median(int_values)
 
-    def raw_to_display_units(self, raw_value):
-        return (raw_value - OFFSET) / SCALE_FACTOR
+    def raw_to_weight_1(self, raw_value):
+        return (raw_value - OFFSET_1) / SCALE_FACTOR_1
+
+    def raw_to_weight_2(self, raw_value):
+        return (raw_value - OFFSET_2) / SCALE_FACTOR_2
 
     def zero_scale(self):
-        if self.hx is None or self.busy:
-            if self.hx is None:
-                self.status_label.config(text="Connect the sensor first")
+        if self.busy:
+            return
+
+        if self.hx1 is None or self.hx2 is None:
+            self.status_label.config(text="Connect both sensors first")
             return
 
         self.busy = True
@@ -244,18 +275,26 @@ class ScaleApp:
 
         try:
             time.sleep(1.5)
-            zero_samples = []
+
+            zero_samples_1 = []
+            zero_samples_2 = []
+
             for _ in range(10):
-                zero_samples.append(self.read_raw_once())
+                zero_samples_1.append(self.read_raw_once(self.hx1, "Sensor 1"))
+                zero_samples_2.append(self.read_raw_once(self.hx2, "Sensor 2"))
                 time.sleep(0.05)
 
-            zero_raw = statistics.median(zero_samples)
+            zero_raw_1 = statistics.median(zero_samples_1)
+            zero_raw_2 = statistics.median(zero_samples_2)
 
             self.value_label.config(text=f"0.0 {DISPLAY_UNIT}")
-            self.status_label.config(text=f"Current empty raw value: {zero_raw}")
-            self.instruction_label.config(
-                text="For permanent tare, copy this raw value into OFFSET later"
+            self.status_label.config(
+                text=f"Empty raw values: S1={zero_raw_1}  S2={zero_raw_2}"
             )
+            self.instruction_label.config(
+                text="Copy these into OFFSET_1 and OFFSET_2 later for permanent tare"
+            )
+
         except Exception as e:
             self.status_label.config(text=f"Zero failed: {e}")
         finally:
@@ -270,12 +309,14 @@ class ScaleApp:
         self.value_label.config(text=f"--.- {DISPLAY_UNIT}", fg="lime")
         self.status_label.config(text="Ready")
         self.progress_label.config(text="")
-        self.instruction_label.config(text="Tap CONNECT SENSOR, then measure")
+        self.instruction_label.config(text="Tap CONNECT SENSORS, then measure")
 
     def start_measurement(self):
-        if self.hx is None or self.busy:
-            if self.hx is None:
-                self.status_label.config(text="Connect the sensor first")
+        if self.busy:
+            return
+
+        if self.hx1 is None or self.hx2 is None:
+            self.status_label.config(text="Connect both sensors first")
             return
 
         self.busy = True
@@ -295,13 +336,20 @@ class ScaleApp:
             count = 0
 
             while (time.time() - start_time) < MEASUREMENT_TIME_SECONDS:
-                raw_value = self.read_raw_once()
-                scaled_value = self.raw_to_display_units(raw_value)
-                self.measurements.append(scaled_value)
+                raw1 = self.read_raw_once(self.hx1, "Sensor 1")
+                raw2 = self.read_raw_once(self.hx2, "Sensor 2")
+
+                weight1 = self.raw_to_weight_1(raw1)
+                weight2 = self.raw_to_weight_2(raw2)
+                total_weight = weight1 + weight2
+
+                self.measurements.append(total_weight)
                 count += 1
 
-                self.value_label.config(text=f"{scaled_value:.1f} {DISPLAY_UNIT}", fg="yellow")
-                self.status_label.config(text="Measuring... please stand still")
+                self.value_label.config(text=f"{total_weight:.1f} {DISPLAY_UNIT}", fg="yellow")
+                self.status_label.config(
+                    text=f"Left: {weight1:.1f} {DISPLAY_UNIT}   Right: {weight2:.1f} {DISPLAY_UNIT}"
+                )
                 self.progress_label.config(text=f"Samples collected: {count}")
                 self.root.update()
 
@@ -323,7 +371,7 @@ class ScaleApp:
         except Exception as e:
             self.value_label.config(text="ERROR", fg="red")
             self.status_label.config(text=f"Measurement failed: {e}")
-            self.instruction_label.config(text="Check HX711 connection and calibration")
+            self.instruction_label.config(text="Check both HX711 connections and calibration")
             self.progress_label.config(text="")
         finally:
             self.busy = False
