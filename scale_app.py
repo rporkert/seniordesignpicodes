@@ -5,11 +5,21 @@ import tkinter as tk
 import RPi.GPIO as GPIO
 from hx711 import HX711
 
+# HX711 #1 / LEFT SIDE
+DT1_PIN = 17
+SCK1_PIN = 27
+
+# HX711 #2 / RIGHT SIDE
 DT2_PIN = 22
 SCK2_PIN = 23
 
+# CALIBRATION VALUES
+# Replace after running calibrate_raw.py
+OFFSET_1 = 0
+SCALE_FACTOR_1 = 1.0
+
 OFFSET_2 = -509316
-SCALE_FACTOR_2 = 33.95111111111111
+SCALE_FACTOR_2 = -33.95111111111111
 
 DISPLAY_UNIT = "lb"
 
@@ -31,10 +41,13 @@ class ScaleApp:
         self.root.attributes("-topmost", True)
         self.root.bind("<Escape>", self.quit_app)
 
+        self.hx1 = None
         self.hx2 = None
         self.busy = False
         self.measurements = []
-        self.current_offset = OFFSET_2
+
+        self.current_offset_1 = OFFSET_1
+        self.current_offset_2 = OFFSET_2
 
         self.build_ui()
         self.show_startup_status()
@@ -166,13 +179,20 @@ class ScaleApp:
         self.start_button.config(state=state)
         self.reset_button.config(state=state)
 
-    def connect_sensor(self):
+    def connect_sensors(self):
         try:
-            if self.hx2 is not None:
+            if self.hx1 is not None and self.hx2 is not None:
                 return True
 
             GPIO.cleanup()
             time.sleep(0.1)
+
+            self.hx1 = HX711(
+                dout_pin=DT1_PIN,
+                pd_sck_pin=SCK1_PIN,
+                channel=HX711_CHANNEL,
+                gain=HX711_GAIN
+            )
 
             self.hx2 = HX711(
                 dout_pin=DT2_PIN,
@@ -185,26 +205,30 @@ class ScaleApp:
             return True
 
         except Exception as e:
+            self.hx1 = None
             self.hx2 = None
             self.value_label.config(text="ERROR", fg="red")
             self.status_label.config(text=f"Sensor connection failed: {e}")
-            self.instruction_label.config(text="Please check the scale wiring.")
+            self.instruction_label.config(text="Please check both HX711 connections.")
             return False
 
-    def read_raw_once(self):
-        if self.hx2 is None:
-            raise RuntimeError("Sensor is not connected.")
+    def read_raw_once(self, hx, sensor_name):
+        if hx is None:
+            raise RuntimeError(f"{sensor_name} is not connected.")
 
-        values = self.hx2.get_raw_data(times=5)
+        values = hx.get_raw_data(times=5)
 
         if not values:
-            raise RuntimeError("No sensor data received.")
+            raise RuntimeError(f"No data received from {sensor_name}.")
 
         int_values = [int(v) for v in values]
         return statistics.median(int_values)
 
-    def raw_to_weight(self, raw_value):
-        return (raw_value - self.current_offset) / SCALE_FACTOR_2
+    def raw_to_weight_1(self, raw_value):
+        return (raw_value - self.current_offset_1) / SCALE_FACTOR_1
+
+    def raw_to_weight_2(self, raw_value):
+        return (raw_value - self.current_offset_2) / SCALE_FACTOR_2
 
     def zero_scale(self):
         if self.busy:
@@ -220,18 +244,21 @@ class ScaleApp:
         self.root.update()
 
         try:
-            if not self.connect_sensor():
+            if not self.connect_sensors():
                 return
 
             time.sleep(1.5)
 
-            zero_samples = []
+            zero_samples_1 = []
+            zero_samples_2 = []
+
             for _ in range(15):
-                zero_samples.append(self.read_raw_once())
+                zero_samples_1.append(self.read_raw_once(self.hx1, "Sensor 1"))
+                zero_samples_2.append(self.read_raw_once(self.hx2, "Sensor 2"))
                 time.sleep(0.05)
 
-            zero_raw = statistics.median(zero_samples)
-            self.current_offset = zero_raw
+            self.current_offset_1 = statistics.median(zero_samples_1)
+            self.current_offset_2 = statistics.median(zero_samples_2)
 
             self.value_label.config(text=f"0.0 {DISPLAY_UNIT}", fg="lime")
             self.status_label.config(text="Scale zeroed.")
@@ -262,7 +289,7 @@ class ScaleApp:
         self.root.update()
 
         try:
-            if not self.connect_sensor():
+            if not self.connect_sensors():
                 return
 
             self.measure_weight()
@@ -271,7 +298,7 @@ class ScaleApp:
             self.value_label.config(text="ERROR", fg="red")
             self.status_label.config(text="Unable to complete measurement.")
             self.instruction_label.config(text="Please try again.")
-            self.progress_label.config("")
+            self.progress_label.config(text="")
 
         finally:
             self.busy = False
@@ -290,14 +317,20 @@ class ScaleApp:
         self.measurements = []
 
         while (time.time() - start_time) < MEASUREMENT_TIME_SECONDS:
-            raw_value = self.read_raw_once()
-            weight = self.raw_to_weight(raw_value)
+            raw1 = self.read_raw_once(self.hx1, "Sensor 1")
+            raw2 = self.read_raw_once(self.hx2, "Sensor 2")
 
-            self.measurements.append(weight)
+            weight1 = self.raw_to_weight_1(raw1)
+            weight2 = self.raw_to_weight_2(raw2)
+            total_weight = weight1 + weight2
+
+            self.measurements.append(total_weight)
             count += 1
 
-            self.value_label.config(text=f"{weight:.1f} {DISPLAY_UNIT}", fg="yellow")
-            self.status_label.config(text="Measuring...")
+            self.value_label.config(text=f"{total_weight:.1f} {DISPLAY_UNIT}", fg="yellow")
+            self.status_label.config(
+                text=f"Left: {weight1:.1f} {DISPLAY_UNIT}   Right: {weight2:.1f} {DISPLAY_UNIT}"
+            )
             self.progress_label.config(text=f"Reading {count}")
             self.root.update()
 
