@@ -15,7 +15,7 @@ HX711_GAIN = 128
 
 
 def read_raw(hx):
-    values = hx.get_raw_data(num_measures=5)
+    values = hx.get_raw_data(times=5)
     return statistics.median([int(v) for v in values])
 
 
