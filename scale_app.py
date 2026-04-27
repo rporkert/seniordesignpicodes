@@ -5,19 +5,16 @@ import tkinter as tk
 import RPi.GPIO as GPIO
 from hx711 import HX711
 
-# HX711 #2 ONLY
 DT2_PIN = 22
 SCK2_PIN = 23
 
-# CALIBRATION
 OFFSET_2 = -508336.5
-SCALE_FACTOR_2 = -10.7425
+SCALE_FACTOR_2 = 10.7425
 
 DISPLAY_UNIT = "lb"
 
-# MEASUREMENT SETTINGS
 SETTLE_TIME_SECONDS = 1.5
-MEASUREMENT_TIME_SECONDS = 2.5
+MEASUREMENT_TIME_SECONDS = 3.0
 SAMPLE_DELAY_SECONDS = 0.08
 MIN_VALID_WEIGHT = 1.0
 
@@ -37,6 +34,7 @@ class ScaleApp:
         self.hx2 = None
         self.busy = False
         self.measurements = []
+        self.current_offset = OFFSET_2
 
         self.build_ui()
         self.show_startup_status()
@@ -44,7 +42,7 @@ class ScaleApp:
     def show_startup_status(self):
         self.value_label.config(text=f"--.- {DISPLAY_UNIT}", fg="lime")
         self.status_label.config(text="Ready")
-        self.instruction_label.config(text="Tap START to begin.")
+        self.instruction_label.config(text="Step off the scale and tap ZERO.")
 
     def build_ui(self):
         self.main_frame = tk.Frame(self.root, bg="black")
@@ -61,7 +59,7 @@ class ScaleApp:
 
         self.instruction_label = tk.Label(
             self.main_frame,
-            text="Tap START to begin.",
+            text="Step off the scale and tap ZERO.",
             font=("Arial", 22, "bold"),
             fg="cyan",
             bg="black",
@@ -102,6 +100,21 @@ class ScaleApp:
         button_frame = tk.Frame(self.main_frame, bg="black")
         button_frame.pack(pady=(10, 18))
 
+        self.zero_button = tk.Button(
+            button_frame,
+            text="ZERO",
+            font=("Arial", 26, "bold"),
+            width=10,
+            height=3,
+            command=self.zero_scale,
+            bg="#424242",
+            fg="white",
+            activebackground="#303030",
+            activeforeground="white",
+            bd=4
+        )
+        self.zero_button.grid(row=0, column=0, padx=14, pady=10)
+
         self.start_button = tk.Button(
             button_frame,
             text="START",
@@ -115,22 +128,7 @@ class ScaleApp:
             activeforeground="white",
             bd=4
         )
-        self.start_button.grid(row=0, column=0, padx=14, pady=10)
-
-        self.zero_button = tk.Button(
-            button_frame,
-            text="ZERO",
-            font=("Arial", 24, "bold"),
-            width=10,
-            height=3,
-            command=self.zero_scale,
-            bg="#424242",
-            fg="white",
-            activebackground="#303030",
-            activeforeground="white",
-            bd=4
-        )
-        self.zero_button.grid(row=0, column=1, padx=14, pady=10)
+        self.start_button.grid(row=0, column=1, padx=14, pady=10)
 
         self.reset_button = tk.Button(
             button_frame,
@@ -164,12 +162,15 @@ class ScaleApp:
 
     def set_buttons_enabled(self, enabled):
         state = "normal" if enabled else "disabled"
-        self.start_button.config(state=state)
         self.zero_button.config(state=state)
+        self.start_button.config(state=state)
         self.reset_button.config(state=state)
 
     def connect_sensor(self):
         try:
+            if self.hx2 is not None:
+                return True
+
             GPIO.cleanup()
             time.sleep(0.1)
 
@@ -187,14 +188,14 @@ class ScaleApp:
             self.hx2 = None
             self.value_label.config(text="ERROR", fg="red")
             self.status_label.config(text=f"Sensor connection failed: {e}")
-            self.instruction_label.config(text="Please check the scale connection.")
+            self.instruction_label.config(text="Please check the scale wiring.")
             return False
 
     def read_raw_once(self):
         if self.hx2 is None:
             raise RuntimeError("Sensor is not connected.")
 
-        values = self.hx2.get_raw_data(times=3)
+        values = self.hx2.get_raw_data(times=5)
 
         if not values:
             raise RuntimeError("No sensor data received.")
@@ -203,31 +204,7 @@ class ScaleApp:
         return statistics.median(int_values)
 
     def raw_to_weight(self, raw_value):
-        return (raw_value - OFFSET_2) / SCALE_FACTOR_2
-
-    def start_sequence(self):
-        if self.busy:
-            return
-
-        self.busy = True
-        self.set_buttons_enabled(False)
-
-        self.value_label.config(text="...", fg="yellow")
-        self.status_label.config(text="Preparing scale...")
-        self.progress_label.config(text="")
-        self.instruction_label.config(text="Please stand still.")
-        self.root.update()
-
-        try:
-            if self.hx2 is None:
-                if not self.connect_sensor():
-                    return
-
-            self.measure_weight()
-
-        finally:
-            self.busy = False
-            self.set_buttons_enabled(True)
+        return (raw_value - self.current_offset) / SCALE_FACTOR_2
 
     def zero_scale(self):
         if self.busy:
@@ -239,31 +216,62 @@ class ScaleApp:
         self.value_label.config(text="0.0 lb", fg="yellow")
         self.status_label.config(text="Zeroing scale...")
         self.progress_label.config(text="")
-        self.instruction_label.config(text="Please step off the scale.")
+        self.instruction_label.config(text="Make sure the scale is empty.")
         self.root.update()
 
         try:
-            if self.hx2 is None:
-                if not self.connect_sensor():
-                    return
+            if not self.connect_sensor():
+                return
 
             time.sleep(1.5)
 
             zero_samples = []
-            for _ in range(10):
+            for _ in range(15):
                 zero_samples.append(self.read_raw_once())
                 time.sleep(0.05)
 
             zero_raw = statistics.median(zero_samples)
+            self.current_offset = zero_raw
 
             self.value_label.config(text=f"0.0 {DISPLAY_UNIT}", fg="lime")
             self.status_label.config(text="Scale zeroed.")
-            self.instruction_label.config(text="Tap START when ready.")
+            self.instruction_label.config(text="Step onto the scale and tap START.")
+            self.progress_label.config(text="")
 
         except Exception:
             self.value_label.config(text="ERROR", fg="red")
             self.status_label.config(text="Unable to zero scale.")
             self.instruction_label.config(text="Please check the scale and try again.")
+            self.progress_label.config(text="")
+
+        finally:
+            self.busy = False
+            self.set_buttons_enabled(True)
+
+    def start_sequence(self):
+        if self.busy:
+            return
+
+        self.busy = True
+        self.set_buttons_enabled(False)
+
+        self.value_label.config(text="...", fg="yellow")
+        self.status_label.config(text="Preparing measurement...")
+        self.progress_label.config(text="")
+        self.instruction_label.config(text="Please stand still.")
+        self.root.update()
+
+        try:
+            if not self.connect_sensor():
+                return
+
+            self.measure_weight()
+
+        except Exception:
+            self.value_label.config(text="ERROR", fg="red")
+            self.status_label.config(text="Unable to complete measurement.")
+            self.instruction_label.config(text="Please try again.")
+            self.progress_label.config("")
 
         finally:
             self.busy = False
@@ -300,7 +308,7 @@ class ScaleApp:
         if stable_weight is None:
             self.value_label.config(text="--.- lb", fg="orange")
             self.status_label.config(text="No stable weight detected.")
-            self.instruction_label.config(text="Step onto the scale and try again.")
+            self.instruction_label.config(text="Stand still and try again.")
             self.progress_label.config(text="")
         else:
             self.value_label.config(text=f"{stable_weight:.1f} {DISPLAY_UNIT}", fg="lime")
@@ -316,7 +324,7 @@ class ScaleApp:
 
         filtered = [
             r for r in readings
-            if abs(r - median_value) <= max(2.0, abs(median_value) * 0.05)
+            if abs(r - median_value) <= max(5.0, abs(median_value) * 0.10)
         ]
 
         if not filtered:
@@ -337,7 +345,7 @@ class ScaleApp:
         self.value_label.config(text=f"--.- {DISPLAY_UNIT}", fg="lime")
         self.status_label.config(text="Ready")
         self.progress_label.config(text="")
-        self.instruction_label.config(text="Tap START to begin.")
+        self.instruction_label.config(text="Step off the scale and tap ZERO.")
 
     def quit_app(self, event=None):
         try:
