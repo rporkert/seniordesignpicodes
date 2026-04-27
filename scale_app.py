@@ -5,24 +5,17 @@ import tkinter as tk
 import RPi.GPIO as GPIO
 from hx711 import HX711
 
-# ------------------------------------------------
 # HX711 #2 ONLY
-# ------------------------------------------------
 DT2_PIN = 22
 SCK2_PIN = 23
 
-# ------------------------------------------------
-# CALIBRATION VALUES FOR HX711 #2
-# Replace these after calibration
-# ------------------------------------------------
-OFFSET_2 = 0
-SCALE_FACTOR_2 = 1000.0
+# CALIBRATION
+OFFSET_2 = -508336.5
+SCALE_FACTOR_2 = 10.7425
 
 DISPLAY_UNIT = "lb"
 
-# ------------------------------------------------
 # MEASUREMENT SETTINGS
-# ------------------------------------------------
 SETTLE_TIME_SECONDS = 1.5
 MEASUREMENT_TIME_SECONDS = 2.5
 SAMPLE_DELAY_SECONDS = 0.08
@@ -35,7 +28,7 @@ HX711_GAIN = 128
 class ScaleApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Touch Scale")
+        self.root.title("Digital Scale")
         self.root.configure(bg="black")
         self.root.after(100, lambda: self.root.attributes("-fullscreen", True))
         self.root.attributes("-topmost", True)
@@ -50,10 +43,8 @@ class ScaleApp:
 
     def show_startup_status(self):
         self.value_label.config(text=f"--.- {DISPLAY_UNIT}", fg="lime")
-        self.status_label.config(text="App started")
-        self.instruction_label.config(
-            text="Tap CONNECT SENSOR to begin."
-        )
+        self.status_label.config(text="Ready")
+        self.instruction_label.config(text="Tap START to begin.")
 
     def build_ui(self):
         self.main_frame = tk.Frame(self.root, bg="black")
@@ -61,8 +52,8 @@ class ScaleApp:
 
         self.header_label = tk.Label(
             self.main_frame,
-            text="DIGITAL SCALE",
-            font=("Arial", 26, "bold"),
+            text="DIGITAL WEIGHT SCALE",
+            font=("Arial", 28, "bold"),
             fg="white",
             bg="black"
         )
@@ -70,8 +61,8 @@ class ScaleApp:
 
         self.instruction_label = tk.Label(
             self.main_frame,
-            text="Loading...",
-            font=("Arial", 20, "bold"),
+            text="Tap START to begin.",
+            font=("Arial", 22, "bold"),
             fg="cyan",
             bg="black",
             wraplength=760,
@@ -82,7 +73,7 @@ class ScaleApp:
         self.value_label = tk.Label(
             self.main_frame,
             text=f"--.- {DISPLAY_UNIT}",
-            font=("Arial", 58, "bold"),
+            font=("Arial", 62, "bold"),
             fg="lime",
             bg="black"
         )
@@ -111,38 +102,25 @@ class ScaleApp:
         button_frame = tk.Frame(self.main_frame, bg="black")
         button_frame.pack(pady=(10, 18))
 
-        self.connect_button = tk.Button(
-            button_frame,
-            text="CONNECT\nSENSOR",
-            font=("Arial", 22, "bold"),
-            width=10,
-            height=3,
-            command=self.connect_sensor,
-            bg="#6a1b9a",
-            fg="white",
-            bd=4
-        )
-        self.connect_button.grid(row=0, column=0, padx=12, pady=10)
-
         self.start_button = tk.Button(
             button_frame,
-            text="START\nMEASUREMENT",
-            font=("Arial", 24, "bold"),
-            width=14,
+            text="START",
+            font=("Arial", 28, "bold"),
+            width=12,
             height=3,
-            command=self.start_measurement,
+            command=self.start_sequence,
             bg="#1976d2",
             fg="white",
             activebackground="#125ca1",
             activeforeground="white",
             bd=4
         )
-        self.start_button.grid(row=0, column=1, padx=12, pady=10)
+        self.start_button.grid(row=0, column=0, padx=14, pady=10)
 
         self.zero_button = tk.Button(
             button_frame,
-            text="ZERO /\nTARE",
-            font=("Arial", 22, "bold"),
+            text="ZERO",
+            font=("Arial", 24, "bold"),
             width=10,
             height=3,
             command=self.zero_scale,
@@ -152,12 +130,12 @@ class ScaleApp:
             activeforeground="white",
             bd=4
         )
-        self.zero_button.grid(row=0, column=2, padx=12, pady=10)
+        self.zero_button.grid(row=0, column=1, padx=14, pady=10)
 
-        self.remeasure_button = tk.Button(
+        self.reset_button = tk.Button(
             button_frame,
-            text="RE-\nMEASURE",
-            font=("Arial", 22, "bold"),
+            text="RESET",
+            font=("Arial", 24, "bold"),
             width=10,
             height=3,
             command=self.reset_screen,
@@ -167,7 +145,7 @@ class ScaleApp:
             activeforeground="white",
             bd=4
         )
-        self.remeasure_button.grid(row=0, column=3, padx=12, pady=10)
+        self.reset_button.grid(row=0, column=2, padx=14, pady=10)
 
         self.quit_button = tk.Button(
             self.main_frame,
@@ -184,14 +162,13 @@ class ScaleApp:
         )
         self.quit_button.pack(pady=(5, 20))
 
+    def set_buttons_enabled(self, enabled):
+        state = "normal" if enabled else "disabled"
+        self.start_button.config(state=state)
+        self.zero_button.config(state=state)
+        self.reset_button.config(state=state)
+
     def connect_sensor(self):
-        if self.busy:
-            return
-
-        self.status_label.config(text="Connecting to HX711 #2 only...")
-        self.progress_label.config(text="")
-        self.root.update()
-
         try:
             GPIO.cleanup()
             time.sleep(0.1)
@@ -202,159 +179,145 @@ class ScaleApp:
                 channel=HX711_CHANNEL,
                 gain=HX711_GAIN
             )
-            self.hx2.reset()
-            time.sleep(0.2)
 
-            self.status_label.config(text="HX711 #2 connected")
-            self.instruction_label.config(
-                text="Tap ZERO with nobody on the scale, then START MEASUREMENT"
-            )
+            time.sleep(0.5)
+            return True
 
         except Exception as e:
             self.hx2 = None
+            self.value_label.config(text="ERROR", fg="red")
             self.status_label.config(text=f"Sensor connection failed: {e}")
-            self.instruction_label.config(text="Check HX711 #2 wiring")
-
-    def set_buttons_enabled(self, enabled):
-        state = "normal" if enabled else "disabled"
-        self.connect_button.config(state=state)
-        self.start_button.config(state=state)
-        self.zero_button.config(state=state)
-        self.remeasure_button.config(state=state)
+            self.instruction_label.config(text="Please check the scale connection.")
+            return False
 
     def read_raw_once(self):
         if self.hx2 is None:
-            raise RuntimeError("HX711 #2 not connected")
+            raise RuntimeError("Sensor is not connected.")
 
         values = self.hx2.get_raw_data(times=3)
+
         if not values:
-            raise RuntimeError("No data returned from HX711 #2")
+            raise RuntimeError("No sensor data received.")
 
         int_values = [int(v) for v in values]
         return statistics.median(int_values)
 
-    def raw_to_weight_2(self, raw_value):
+    def raw_to_weight(self, raw_value):
         return (raw_value - OFFSET_2) / SCALE_FACTOR_2
+
+    def start_sequence(self):
+        if self.busy:
+            return
+
+        self.busy = True
+        self.set_buttons_enabled(False)
+
+        self.value_label.config(text="...", fg="yellow")
+        self.status_label.config(text="Preparing scale...")
+        self.progress_label.config(text="")
+        self.instruction_label.config(text="Please stand still.")
+        self.root.update()
+
+        try:
+            if self.hx2 is None:
+                if not self.connect_sensor():
+                    return
+
+            self.measure_weight()
+
+        finally:
+            self.busy = False
+            self.set_buttons_enabled(True)
 
     def zero_scale(self):
         if self.busy:
             return
 
-        if self.hx2 is None:
-            self.status_label.config(text="Connect HX711 #2 first")
-            return
-
         self.busy = True
         self.set_buttons_enabled(False)
-        self.status_label.config(text="Zeroing scale... Make sure nobody is standing on it.")
+
+        self.value_label.config(text="0.0 lb", fg="yellow")
+        self.status_label.config(text="Zeroing scale...")
         self.progress_label.config(text="")
-        self.instruction_label.config(text="Please step off the scale")
+        self.instruction_label.config(text="Please step off the scale.")
         self.root.update()
 
         try:
+            if self.hx2 is None:
+                if not self.connect_sensor():
+                    return
+
             time.sleep(1.5)
 
-            zero_samples_2 = []
-
+            zero_samples = []
             for _ in range(10):
-                zero_samples_2.append(self.read_raw_once())
+                zero_samples.append(self.read_raw_once())
                 time.sleep(0.05)
 
-            zero_raw_2 = statistics.median(zero_samples_2)
+            zero_raw = statistics.median(zero_samples)
 
-            self.value_label.config(text=f"0.0 {DISPLAY_UNIT}")
-            self.status_label.config(text=f"Empty raw value S2={zero_raw_2}")
-            self.instruction_label.config(
-                text="Copy this value into OFFSET_2 later for permanent tare"
-            )
+            self.value_label.config(text=f"0.0 {DISPLAY_UNIT}", fg="lime")
+            self.status_label.config(text="Scale zeroed.")
+            self.instruction_label.config(text="Tap START when ready.")
 
-        except Exception as e:
-            self.status_label.config(text=f"Zero failed: {e}")
+        except Exception:
+            self.value_label.config(text="ERROR", fg="red")
+            self.status_label.config(text="Unable to zero scale.")
+            self.instruction_label.config(text="Please check the scale and try again.")
+
         finally:
             self.busy = False
             self.set_buttons_enabled(True)
 
-    def reset_screen(self):
-        if self.busy:
-            return
-
-        self.measurements = []
-        self.value_label.config(text=f"--.- {DISPLAY_UNIT}", fg="lime")
-        self.status_label.config(text="Ready")
-        self.progress_label.config(text="")
-        self.instruction_label.config(text="Tap CONNECT SENSOR, then measure")
-
-    def start_measurement(self):
-        if self.busy:
-            return
-
-        if self.hx2 is None:
-            self.status_label.config(text="Connect HX711 #2 first")
-            return
-
-        self.busy = True
-        self.measurements = []
-        self.set_buttons_enabled(False)
-
-        self.instruction_label.config(text="Stand still while measuring")
-        self.status_label.config(text="Preparing measurement...")
-        self.progress_label.config(text="Settling...")
-        self.value_label.config(text="...", fg="yellow")
+    def measure_weight(self):
+        self.instruction_label.config(text="Stand still while measuring.")
+        self.status_label.config(text="Measuring...")
+        self.progress_label.config(text="Collecting stable reading...")
         self.root.update()
 
-        try:
-            time.sleep(SETTLE_TIME_SECONDS)
+        time.sleep(SETTLE_TIME_SECONDS)
 
-            start_time = time.time()
-            count = 0
+        start_time = time.time()
+        count = 0
+        self.measurements = []
 
-            while (time.time() - start_time) < MEASUREMENT_TIME_SECONDS:
-                raw2 = self.read_raw_once()
-                weight2 = self.raw_to_weight_2(raw2)
-                total_weight = weight2
+        while (time.time() - start_time) < MEASUREMENT_TIME_SECONDS:
+            raw_value = self.read_raw_once()
+            weight = self.raw_to_weight(raw_value)
 
-                self.measurements.append(total_weight)
-                count += 1
+            self.measurements.append(weight)
+            count += 1
 
-                self.value_label.config(text=f"{total_weight:.1f} {DISPLAY_UNIT}", fg="yellow")
-                self.status_label.config(text=f"Sensor 2: {weight2:.1f} {DISPLAY_UNIT}")
-                self.progress_label.config(text=f"Samples collected: {count}")
-                self.root.update()
+            self.value_label.config(text=f"{weight:.1f} {DISPLAY_UNIT}", fg="yellow")
+            self.status_label.config(text="Measuring...")
+            self.progress_label.config(text=f"Reading {count}")
+            self.root.update()
 
-                time.sleep(SAMPLE_DELAY_SECONDS)
+            time.sleep(SAMPLE_DELAY_SECONDS)
 
-            stable_weight = self.compute_stable_weight(self.measurements)
+        stable_weight = self.compute_stable_weight(self.measurements)
 
-            if stable_weight is None:
-                self.value_label.config(text="NO LOAD", fg="orange")
-                self.status_label.config(text="No valid weight detected")
-                self.instruction_label.config(text="Step on the scale and try again")
-                self.progress_label.config(text="")
-            else:
-                self.value_label.config(text=f"{stable_weight:.1f} {DISPLAY_UNIT}", fg="lime")
-                self.status_label.config(text="Measurement complete")
-                self.instruction_label.config(text="Please step off the scale")
-                self.progress_label.config(text="Tap RE-MEASURE for the next reading")
-
-        except Exception as e:
-            self.value_label.config(text="ERROR", fg="red")
-            self.status_label.config(text=f"Measurement failed: {e}")
-            self.instruction_label.config(text="Check HX711 #2 connection and calibration")
+        if stable_weight is None:
+            self.value_label.config(text="--.- lb", fg="orange")
+            self.status_label.config(text="No stable weight detected.")
+            self.instruction_label.config(text="Step onto the scale and try again.")
             self.progress_label.config(text="")
-        finally:
-            self.busy = False
-            self.set_buttons_enabled(True)
+        else:
+            self.value_label.config(text=f"{stable_weight:.1f} {DISPLAY_UNIT}", fg="lime")
+            self.status_label.config(text="Measurement complete.")
+            self.instruction_label.config(text="Please step off the scale.")
+            self.progress_label.config(text="Tap START to measure again.")
 
     def compute_stable_weight(self, readings):
         if not readings:
             return None
 
         median_value = statistics.median(readings)
-        filtered = []
 
-        for r in readings:
-            if abs(r - median_value) <= max(2.0, abs(median_value) * 0.05):
-                filtered.append(r)
+        filtered = [
+            r for r in readings
+            if abs(r - median_value) <= max(2.0, abs(median_value) * 0.05)
+        ]
 
         if not filtered:
             filtered = readings
@@ -365,6 +328,16 @@ class ScaleApp:
             return None
 
         return stable
+
+    def reset_screen(self):
+        if self.busy:
+            return
+
+        self.measurements = []
+        self.value_label.config(text=f"--.- {DISPLAY_UNIT}", fg="lime")
+        self.status_label.config(text="Ready")
+        self.progress_label.config(text="")
+        self.instruction_label.config(text="Tap START to begin.")
 
     def quit_app(self, event=None):
         try:
