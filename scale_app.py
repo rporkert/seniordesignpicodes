@@ -52,7 +52,7 @@ class ScaleApp:
         self.value_label.config(text=f"--.- {DISPLAY_UNIT}", fg="lime")
         self.status_label.config(text="App started")
         self.instruction_label.config(
-            text="Temporary mode: using HX711 #2 only. Tap CONNECT SENSOR."
+            text="Tap CONNECT SENSOR to begin."
         )
 
     def build_ui(self):
@@ -226,7 +226,7 @@ class ScaleApp:
         if self.hx2 is None:
             raise RuntimeError("HX711 #2 not connected")
 
-        values = self.hx2.get_raw_data(num_measures=3)
+        values = self.hx2.get_raw_data(times=3)
         if not values:
             raise RuntimeError("No data returned from HX711 #2")
 
